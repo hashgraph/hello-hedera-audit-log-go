@@ -1,0 +1,218 @@
+<html>
+    <head>
+        <title>AdsDax HCS Tracking Demo</title>
+
+        <style>
+            body {
+                background-color: #8c8c8c;
+                color: #f9f9f9;
+                margin: 0;
+            }
+
+            h2 {
+                text-align: center;
+                margin-top: 18px;
+            }
+
+            div#log {
+                float: left;
+                background-color: #222222;
+                margin-left: 5%;
+                width: 42.5%;
+                height: 21vw;
+                overflow: scroll;
+                padding: 10px;
+                box-sizing: border-box;
+                word-wrap: break-word;
+            }
+
+            video#video {
+                float: right;
+                background-color: #222222;
+                margin-right: 5%;
+                width: 42.5%;
+            }
+
+            button#play {
+                float: left;
+                clear: left;
+                margin-left: 5%;
+                margin-top: 20px;
+            }
+
+            p.local {
+                /* using default styling for now */
+            }
+
+            p.sent {
+                color: #509ddb;
+            }
+
+            p.retrieved {
+                color: #e16319;
+            }
+
+            p.retrieved a {
+                text-decoration: none;
+                color: #ff9800;
+            }
+
+            input#info {
+                float: left;
+                margin-top: 10px;
+                margin-left: 5%;
+                width: 42.5%;
+            }
+
+        </style>
+    </head>
+    <body>
+        <h2>AdsDax HCS Tracking Demo</h2>
+
+        <div id="log"></div>
+        <video id="video"></video>
+        <input type="text" id="info" maxlength="30" placeholder="Enter a secret message here">
+        <button disabled id="play">PLAY</button>
+
+        <script>
+
+            var videos = [
+                //sample videos taken from https://gist.github.com/jsturgis/3b19447b304616f18657
+                'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+                'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
+                'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4'
+            ],
+                videoUrl = videos[Math.floor(Math.random() * videos.length)],
+                log = document.getElementById('log'),
+                video = document.getElementById('video'),
+                info = document.getElementById('info'),
+                playButton = document.getElementById('play'),
+                startSent = false,
+                fqSent = false,
+                midSent = false,
+                tqSent = false,
+                completeSent = false,
+                duration,
+                fqMarker,
+                midMarker,
+                tqMarker,
+                currentTime;
+
+            video.src = videoUrl;
+
+            function logMessage (level, msg) {
+                var el = document.createElement('p');
+
+                el.className += level.toLowerCase();
+                el.innerHTML = new Date().toISOString() + ' (' + level + ') - ' + msg + '<br/><br/>';
+
+                log.appendChild(el);
+            }
+
+            function sendTracker (eventName) {
+                logMessage('LOCAL', 'Triggered tracking event ' + eventName.toUpperCase() + ' locally. Sending tracking request to HCS.');
+                // console.log('send tracker called with event name: ' + eventName);
+
+                var xhr = new XMLHttpRequest();
+
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState === 4) {
+                        if (xhr.status === 200) {
+                            var data = JSON.parse(xhr.responseText);
+                            logMessage('SENT', 'Sent tracking event to the Hedera consensus service with the following information: ' + xhr.responseText);
+                            getConsensusMessage(data.public.transactionId);
+                        }else {
+                            alert('Received bad response from HCS tracking logic. Please try refreshing the page.');
+                        }
+                    }
+                };
+                xhr.onerror = function () {
+                    alert('Error sending tracking ping for event: ' + eventName + '. Please try refreshing the page.');
+                };
+
+                var params = 'localTimestamp=' + new Date().getTime() + '&tzOffset=' + new Date().getTimezoneOffset() + '&videoUrl=' + encodeURIComponent(video.src) + '&videoCT=' + (eventName === 'ended' ? video.duration : video.currentTime) + '&videoDuration=' + video.duration + '&event=' + eventName + '&additionalInfo=' + encodeURIComponent(info.value) + "&userAgent=" + encodeURIComponent(navigator.userAgent);
+
+                xhr.open('GET', '/track?' + params, true);
+                xhr.send();
+            }
+
+            function getConsensusMessage (transactionId) {
+                var xhr = new XMLHttpRequest();
+
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState === 4) {
+                        if (xhr.status === 200) {
+                            var data = JSON.parse(xhr.responseText);
+
+                            logMessage('RETRIEVED', 'The following event has now passed through the Hedera Consensus Service and reached consensus: ' + JSON.stringify(data.message) + '<br/><br/>To see this message on an explorer, click <a target="_blank" href="' + data.url + '">HERE</a>');
+                        }else {
+                            alert('Received bad response when retrieving processed HCS message. Please try refreshing the page.');
+                        }
+                    }
+                };
+                xhr.onerror = function () {
+                    alert('Error retrieving HCS message for transactionID ' + transactionId + '.');
+                };
+
+                xhr.open('GET', '/retrieve?' + encodeURIComponent(transactionId), true);
+                xhr.send();
+            }
+
+
+            function playHandler () {
+                if (startSent == false) {
+                    startSent = true;
+                    sendTracker('start');
+                }
+
+                video.play();
+            }
+
+            playButton.onclick = playHandler;
+
+            function timeUpdateHandler () {
+                currentTime = video.currentTime;
+
+                if (currentTime > fqMarker && fqSent == false) {
+                    fqSent = true;
+                    sendTracker('firstQuartile');
+                } else if (currentTime > midMarker && midSent == false) {
+                    midSent = true;
+                    sendTracker('midpoint');
+                } else if (currentTime > tqMarker && tqSent == false) {
+                    tqSent = true;
+                    sendTracker('thirdQuartile');
+
+                    //remove the handler
+                    video.removeEventListener('timeupdate', timeUpdateHandler);
+                }
+            }
+
+            function endedHandler () {
+                if (completeSent == false) {
+                    completeSent = true;
+                    sendTracker('complete');
+                    video.removeEventListener('ended', endedHandler);
+                }
+            }
+
+            function cptHandler () {
+                duration = video.duration;
+                fqMarker = duration * 0.25;
+                midMarker = duration * 0.5;
+                tqMarker = duration * 0.75;
+
+                playButton.removeAttribute('disabled');
+                video.removeEventListener('canplaythrough', cptHandler);
+            }
+
+            video.addEventListener('timeupdate', timeUpdateHandler);
+            video.addEventListener('ended', endedHandler);
+            video.addEventListener('canplaythrough', cptHandler);
+
+            video.load();
+
+        </script>
+
+    </body>
+</html>
