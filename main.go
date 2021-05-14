@@ -341,7 +341,7 @@ func hcsMessageResponseHandler (response hedera.MirrorConsensusTopicResponse) {
 
 	//Get additional information that the Hedera Consensus Service sends alongside our message, such as the consensus
 	// timestamp and sequence number
-	consensusTimestamp := response.ConsensusTimeStamp
+	consensusTimestamp := response.ConsensusTimestamp
 	sequenceNumber := response.SequenceNumber
 	message := string(response.Message) //The message is a byte array, so convert it into a readable string
 
